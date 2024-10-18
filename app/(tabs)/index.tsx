@@ -1,70 +1,146 @@
-import { Image, StyleSheet, Platform } from 'react-native';
-
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+import React, { useState, useRef, useEffect } from "react";
+import { SafeAreaView, Text, FlatList, View, TextInput } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
+import { mainTabStyles } from "./style/main.style";
+import Pair from "@/components/shared/Pair/Pair";
+import { CountSavedData, PairCoins, SocketUrl } from "@/Utils/const";
+import { IPair } from "@/Utils/Types/pair";
+import Toast from "react-native-toast-message";
 
 export default function HomeScreen() {
+  const [trades, setTrades] = useState<IPair[]>([]);
+  let socket: WebSocket | null = null;
+  const tradeBuffer = useRef<IPair[]>([]);
+  const [min, setMin] = useState<number | null>(null);
+  const [max, setMax] = useState<number | null>(null);
+
+  useEffect(() => {
+    trades.forEach((item) => {
+      if (min) {
+        if (item.price < min) {
+          Toast.show({
+            position: "top",
+            type: "error",
+            text1: "Min happened",
+            text2: `Min price now is ${item.price} $`,
+          });
+        }
+      }
+
+      if (max) {
+        if (item.price > max) {
+          Toast.show({
+            position: "top",
+            type: "success",
+            text1: "Max happened",
+            text2: `Max price now is ${item.price} $`,
+          });
+        }
+      }
+    })
+  }, [min, max, trades])
+
+  const getSocketData = () => {
+    socket = new WebSocket(`${SocketUrl}/ws/${PairCoins}@trade`);
+
+    socket.onmessage = (event) => {
+      const tradeData = JSON.parse(event.data);
+      const newTrade: IPair = {
+        price: tradeData.p,
+        quantity: tradeData.q,
+        time: new Date(tradeData.T).toLocaleTimeString(),
+      };
+
+      console.log('newTrade', tradeData.T)
+      tradeBuffer.current.push(newTrade);
+    };
+  };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      setTrades([]);
+      setMin(null)
+      setMax(null)
+      getSocketData();
+
+      const interval = setInterval(() => {
+        if (tradeBuffer.current.length > 0) {
+          setTrades((prevTrades) => {
+            const updatedTrades = [...tradeBuffer.current, ...prevTrades].slice(
+              0,
+              CountSavedData
+            );
+
+            return updatedTrades;
+          });
+          tradeBuffer.current = [];
+        }
+      }, 1000);
+
+      return () => {
+        setTrades([]);
+        if (socket) {
+          socket.close();
+          socket = null;
+          setMin(null)
+          setMax(null)
+        }
+        clearInterval(interval);
+      };
+    }, [])
+  );
+
+  const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
+  const debounceTimeoutMax = useRef<NodeJS.Timeout | null>(null);
+
+  const handleInputChange = (value: string) => {
+    if (debounceTimeout.current) {
+      clearTimeout(debounceTimeout.current);
+    }
+
+    debounceTimeout.current = setTimeout(() => {
+      setMin(Number(value));
+    }, 500);
+  };
+
+  const handleMaxInputChange = (value: string) => {
+    if (debounceTimeoutMax.current) {
+      clearTimeout(debounceTimeoutMax.current);
+    }
+
+    debounceTimeoutMax.current = setTimeout(() => {
+      setMax(Number(value));
+    }, 1000);
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
+    <SafeAreaView style={mainTabStyles.container}>
+      <Text style={mainTabStyles.title}>BTC/USDT Trades</Text>
+
+      <FlatList
+        data={trades}
+        keyExtractor={(_item, index) => index.toString()}
+        renderItem={({ item }) => <Pair {...item} />}
+      />
+
+      <View style={mainTabStyles.inputs}>
+        <TextInput
+          defaultValue={`${min ? min : ''}`}
+          keyboardType="number-pad"
+          onChangeText={handleInputChange} 
+          placeholder="Min:"
+          style={mainTabStyles.input}
         />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({ ios: 'cmd + d', android: 'cmd + m' })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          Tap the Explore tab to learn more about what's included in this starter app.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          When you're ready, run{' '}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+        <TextInput
+          defaultValue={`${max ? max : ''}`}
+          keyboardType="number-pad"
+          placeholder="Max:"
+          onChangeText={handleMaxInputChange}
+          style={mainTabStyles.input}
+        />
+      </View>
+
+      <Toast />
+    </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
-});
